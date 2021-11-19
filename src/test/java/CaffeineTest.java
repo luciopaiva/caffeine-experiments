@@ -18,17 +18,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static util.Util.awaitAll;
 import static util.Util.time;
 
-@SuppressWarnings("ResultOfMethodCallIgnored")
 public class CaffeineTest {
 
     private final Logger logger = LogManager.getLogger(CaffeineTest.class);
     private final int latencyInMillis = 1000;
+    private final int maximumConcurrentTasks = 5;
+
+    private final ExecutorService executor = Executors.newFixedThreadPool(maximumConcurrentTasks);
+    private final List<Future<?>> futures = new ArrayList<>();
 
     private HighLatencyService service;
     private Cache<Integer, String> cache;
 
     @BeforeEach
     public void setup() {
+        futures.clear();
+
         service = new HighLatencyService(latencyInMillis);
         cache = Caffeine.newBuilder()
                 .expireAfterWrite(3, TimeUnit.SECONDS)
@@ -50,15 +55,11 @@ public class CaffeineTest {
      * be recorded in the stats.
      */
     @Test
-    public void testMultiConsumerSameKey() throws InterruptedException {
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
+    public void testMultiConsumerSameKey() {
         logger.info("Starting...");
-        executor.submit(() -> task(1));
-        executor.submit(() -> task(1));
-
-        executor.shutdown();
-        executor.awaitTermination(10, TimeUnit.SECONDS);
+        submit(() -> task(1));
+        submit(() -> task(1));
+        waitForTasks();
         logger.info("Done.");
 
         assertEquals(1, cache.stats().missCount());
@@ -69,24 +70,26 @@ public class CaffeineTest {
      * In this test, two concurrent requests for different keys should not block each other.
      */
     @Test
-    public void testMultiConsumerDifferentKeys() throws InterruptedException {
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
+    public void testMultiConsumerDifferentKeys() {
         logger.info("Starting...");
         long startTime = time();
-        List<Future<?>> futures = new ArrayList<>();
-        futures.add(executor.submit(() -> task(1)));
-        futures.add(executor.submit(() -> task(2)));
-        awaitAll(futures);
+        submit(() -> task(1));
+        submit(() -> task(2));
+        waitForTasks();
         long elapsed = time() - startTime;
-
-        executor.shutdown();
-        executor.awaitTermination(10, TimeUnit.SECONDS);
         logger.info("Done.");
 
         assertEquals(2, cache.stats().missCount());
         assertEquals(2, service.getAccessCount());
         assertTrue(elapsed < 2 * latencyInMillis, "Fetches are not supposed to be sequential");
+    }
+
+    private void submit(Runnable runnable) {
+        futures.add(executor.submit(runnable));
+    }
+
+    private void waitForTasks() {
+        awaitAll(futures);
     }
 
     private void task(int id) {

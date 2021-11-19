@@ -1,7 +1,7 @@
 
 # Caffeine experiments
 
-These are some experiments with the Caffeine cache Java library. See unit tests for details.
+These are some experiments with the Caffeine cache Java library. See [unit tests](src/test/java/CaffeineTest.java) for details.
 
 ## Do cache accesses block each other?
 

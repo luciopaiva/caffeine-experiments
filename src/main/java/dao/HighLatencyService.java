@@ -2,19 +2,29 @@ package dao;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class HighLatencyService {
 
-    Map<Integer, String> stringById = new HashMap<>();
+    private final Map<Integer, String> stringById = new HashMap<>();
+    private final AtomicInteger accessCount = new AtomicInteger();
+    private final int latencyInMillis;
 
-    public HighLatencyService() {
+    public HighLatencyService(int latencyInMillis) {
+        this.latencyInMillis = latencyInMillis;
+
         stringById.put(1, "foo");
         stringById.put(2, "bar");
     }
 
     public String fetchById(int id) {
-        sleep(3000);
+        sleep(latencyInMillis);
+        accessCount.incrementAndGet();
         return stringById.get(id);
+    }
+
+    public int getAccessCount() {
+        return accessCount.get();
     }
 
     private void sleep(int ms) {

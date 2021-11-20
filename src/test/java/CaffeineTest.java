@@ -1,3 +1,4 @@
+import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dao.HighLatencyService;
@@ -8,10 +9,12 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,12 +38,7 @@ public class CaffeineTest {
         futures.clear();
 
         service = new HighLatencyService(latencyInMillis);
-        cache = Caffeine.newBuilder()
-                .expireAfterWrite(3, TimeUnit.SECONDS)
-                .maximumSize(10)
-                .recordStats()
-                .initialCapacity(2)
-                .build();
+        cache = prepareCacheBuilder().build();
     }
 
     @Test
@@ -82,7 +80,7 @@ public class CaffeineTest {
 
         assertEquals(2, cache.stats().missCount());
         assertEquals(2, service.getAccessCount());
-        assertTrue(elapsed < 2 * latencyInMillis, "Fetches are not supposed to be sequential");
+        assertTrue(elapsed < 2 * latencyInMillis, "Fetches are not supposed to happen sequentially");
     }
 
     /**
@@ -94,7 +92,7 @@ public class CaffeineTest {
         logger.info("Starting...");
         long startTime = time();
         for (int i = 0; i < maximumConcurrentTasks; i++) {
-            final int index = i + 1;
+            int index = i + 1;
             submit(() -> task(index));
         }
         waitForTasks();
@@ -103,15 +101,38 @@ public class CaffeineTest {
 
         assertEquals(maximumConcurrentTasks, cache.stats().missCount());
         assertEquals(maximumConcurrentTasks, service.getAccessCount());
-        assertTrue(elapsed > 2 * latencyInMillis, "Fetches WILL block others here");
+        assertTrue(elapsed > 2 * latencyInMillis, "Fetches WILL block one another here");
+    }
+
+    /**
+     * This simulates the same scenario as `testMultiConsumerManyDifferentKeys()`, but avoids contention by replacing
+     * `Cache` with `AsyncCache`.
+     */
+    @Test
+    public void testMultiConsumerManyDifferentKeysAsync() {
+        AsyncCache<Integer, String> cache = prepareCacheBuilder().buildAsync();
+
+        logger.info("Starting...");
+        long startTime = time();
+        for (int i = 0; i < maximumConcurrentTasks; i++) {
+            int index = i + 1;
+            submitAsync(() -> taskAsync(index, cache));
+        }
+        waitForTasks();
+        long elapsed = time() - startTime;
+        logger.info("Done.");
+
+        assertEquals(maximumConcurrentTasks, cache.synchronous().stats().missCount());
+        assertEquals(maximumConcurrentTasks, service.getAccessCount());
+        assertTrue(elapsed < 2 * latencyInMillis, "Fetches will NOT block one another here");
     }
 
     private void submit(Runnable runnable) {
         futures.add(executor.submit(runnable));
     }
 
-    private void waitForTasks() {
-        awaitAll(futures);
+    private void submitAsync(Supplier<CompletableFuture<String>> supplier) {
+        futures.add(supplier.get());
     }
 
     private void task(int id) {
@@ -121,5 +142,28 @@ public class CaffeineTest {
             return service.fetchById(id);
         });
         logger.info("Task completed with value: " + value);
+    }
+
+    private CompletableFuture<String> taskAsync(int id, AsyncCache<Integer, String> asyncCache) {
+        logger.info("Task is fetching id " + id);
+        return asyncCache.get(id, k -> {
+            logger.info(String.format("Cache miss! Will fetch id %d from remote server.", id));
+            return service.fetchById(id);
+        }).thenApply(value -> {
+            logger.info("Task completed with value: " + value);
+            return value;
+        });
+    }
+
+    private void waitForTasks() {
+        awaitAll(futures);
+    }
+
+    private Caffeine<Object, Object> prepareCacheBuilder() {
+        return Caffeine.newBuilder()
+                .expireAfterWrite(3, TimeUnit.SECONDS)
+                .maximumSize(10)
+                .recordStats()
+                .initialCapacity(2);
     }
 }

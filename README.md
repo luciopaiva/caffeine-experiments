@@ -36,4 +36,4 @@ Now the second test brings a different scenario where each cache access is looki
 22:27:52.063 [INFO] (Test worker) CaffeineTest: Done.
 ```
 
-Notice that both sense the miss at the same time, meaning the second one was not blocked by the first one.
+Notice that both sense the miss at the same time, meaning the second one was not blocked by the first one. That doesn't prove it won't always block, however. Actually, the author mentions [here](https://github.com/ben-manes/caffeine/issues/192#issuecomment-337365618) how `ConcurrentHashMap` locks on the hash bin, and that lead me to believe Caffeine was being backed by such map. It becomes even more obvious when we read `ConcurrentHashMap`s `computeIfAbsent()` [documentation](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html#computeIfAbsent-K-java.util.function.Function-) and it says exactly the same as Caffeine's `get()` method. Putting a breakpoint on `get()` and navigating its guts proves this is true, as we eventually arrive at `computeIfAbsent()` as we go down the stack. 

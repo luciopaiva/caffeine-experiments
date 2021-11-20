@@ -37,3 +37,36 @@ Now the second test brings a different scenario where each cache access is looki
 ```
 
 Notice that both sense the miss at the same time, meaning the second one was not blocked by the first one. That doesn't prove it won't always block, however. Actually, the author mentions [here](https://github.com/ben-manes/caffeine/issues/192#issuecomment-337365618) how `ConcurrentHashMap` locks on the hash bin, and that lead me to believe Caffeine was being backed by such map. It becomes even more obvious when we read `ConcurrentHashMap`s `computeIfAbsent()` [documentation](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html#computeIfAbsent-K-java.util.function.Function-) and it says exactly the same as Caffeine's `get()` method. Putting a breakpoint on `get()` and navigating its guts proves this is true, as we eventually arrive at `computeIfAbsent()` as we go down the stack. 
+
+And the proof that one key will eventually block another comes with the test `testMultiConsumerManyDifferentKeys()`, which fetches 8 different keys at the same time, while the cache's initial capacity is set to 2:
+
+```
+01:29:43.785 [INFO] (Test worker) CaffeineTest: Starting...
+01:29:43.785 [INFO] (pool-4-thread-1) CaffeineTest: Task is fetching id 1
+01:29:43.786 [INFO] (pool-4-thread-3) CaffeineTest: Task is fetching id 3
+01:29:43.785 [INFO] (pool-4-thread-2) CaffeineTest: Task is fetching id 2
+01:29:43.786 [INFO] (pool-4-thread-1) CaffeineTest: Cache miss! Will fetch id 1 from remote server.
+01:29:43.786 [INFO] (pool-4-thread-5) CaffeineTest: Task is fetching id 5
+01:29:43.786 [INFO] (pool-4-thread-4) CaffeineTest: Task is fetching id 4
+01:29:43.786 [INFO] (pool-4-thread-8) CaffeineTest: Task is fetching id 8
+01:29:43.786 [INFO] (pool-4-thread-7) CaffeineTest: Task is fetching id 7
+01:29:43.786 [INFO] (pool-4-thread-3) CaffeineTest: Cache miss! Will fetch id 3 from remote server.
+01:29:43.786 [INFO] (pool-4-thread-6) CaffeineTest: Task is fetching id 6
+01:29:43.787 [INFO] (pool-4-thread-2) CaffeineTest: Cache miss! Will fetch id 2 from remote server.
+01:29:43.786 [INFO] (pool-4-thread-4) CaffeineTest: Cache miss! Will fetch id 4 from remote server.
+01:29:44.789 [INFO] (pool-4-thread-2) CaffeineTest: Task completed with value: 2
+01:29:44.790 [INFO] (pool-4-thread-5) CaffeineTest: Cache miss! Will fetch id 5 from remote server.
+01:29:44.790 [INFO] (pool-4-thread-7) CaffeineTest: Cache miss! Will fetch id 7 from remote server.
+01:29:44.789 [INFO] (pool-4-thread-6) CaffeineTest: Cache miss! Will fetch id 6 from remote server.
+01:29:44.789 [INFO] (pool-4-thread-3) CaffeineTest: Task completed with value: 3
+01:29:44.791 [INFO] (pool-4-thread-4) CaffeineTest: Task completed with value: 4
+01:29:44.791 [INFO] (pool-4-thread-8) CaffeineTest: Cache miss! Will fetch id 8 from remote server.
+01:29:45.794 [INFO] (pool-4-thread-5) CaffeineTest: Task completed with value: 5
+01:29:45.794 [INFO] (pool-4-thread-6) CaffeineTest: Task completed with value: 6
+01:29:45.795 [INFO] (pool-4-thread-1) CaffeineTest: Task completed with value: 1
+01:29:45.795 [INFO] (pool-4-thread-7) CaffeineTest: Task completed with value: 7
+01:29:45.794 [INFO] (pool-4-thread-8) CaffeineTest: Task completed with value: 8
+01:29:45.796 [INFO] (Test worker) CaffeineTest: Done.
+```
+
+Notice how the 8 threads access the cache at the same time, but 4 of them only print the "cache miss" line one second after; although they were fetching different keys, they were blocked by the first 4.

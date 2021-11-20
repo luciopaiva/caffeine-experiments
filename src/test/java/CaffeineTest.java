@@ -22,7 +22,7 @@ public class CaffeineTest {
 
     private final Logger logger = LogManager.getLogger(CaffeineTest.class);
     private final int latencyInMillis = 1000;
-    private final int maximumConcurrentTasks = 5;
+    private final int maximumConcurrentTasks = 8;
 
     private final ExecutorService executor = Executors.newFixedThreadPool(maximumConcurrentTasks);
     private final List<Future<?>> futures = new ArrayList<>();
@@ -39,6 +39,7 @@ public class CaffeineTest {
                 .expireAfterWrite(3, TimeUnit.SECONDS)
                 .maximumSize(10)
                 .recordStats()
+                .initialCapacity(2)
                 .build();
     }
 
@@ -82,6 +83,27 @@ public class CaffeineTest {
         assertEquals(2, cache.stats().missCount());
         assertEquals(2, service.getAccessCount());
         assertTrue(elapsed < 2 * latencyInMillis, "Fetches are not supposed to be sequential");
+    }
+
+    /**
+     * This test increases the number of concurrent threads to a number where locks because of one key start to affect
+     * other keys.
+     */
+    @Test
+    public void testMultiConsumerManyDifferentKeys() {
+        logger.info("Starting...");
+        long startTime = time();
+        for (int i = 0; i < maximumConcurrentTasks; i++) {
+            final int index = i + 1;
+            submit(() -> task(index));
+        }
+        waitForTasks();
+        long elapsed = time() - startTime;
+        logger.info("Done.");
+
+        assertEquals(maximumConcurrentTasks, cache.stats().missCount());
+        assertEquals(maximumConcurrentTasks, service.getAccessCount());
+        assertTrue(elapsed > 2 * latencyInMillis, "Fetches WILL block others here");
     }
 
     private void submit(Runnable runnable) {

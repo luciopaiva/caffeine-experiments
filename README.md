@@ -13,7 +13,7 @@ I wanted to understand how does this actually work, so I wrote `testMultiConsume
 
 ### When blocking is desired
 
-The first one is the simplest to visualize: if two requests for the same key arrive concurrently, the first one will trigger the mapping function, while the second one will block, waiting for the result of the mapping function call. This is exactly what is seen when the test runs:
+The first one is the simplest to visualize: if two requests for the same key arrive concurrently, the first one will trigger the mapping function, while the second one will block, waiting for the result of the mapping function call of the first one. This is exactly what is seen when the test runs:
 
 ```
 22:27:52.070 [INFO] (Test worker) CaffeineTest: Starting...
@@ -25,9 +25,11 @@ The first one is the simplest to visualize: if two requests for the same key arr
 22:27:53.076 [INFO] (Test worker) CaffeineTest: Done.
 ```
 
+This is desired because if there is an ongoing fetch for the key, we don't want to start another one; let's just wait for the first response to arrive and fulfill both requests at once.
+
 ### When blocking is not desired
 
-Now the second test brings a different scenario where each cache access is looking for a different key. The question here was: will a second thread be blocked by the first one if it's requesting a different key? The docs suggest that it may be possible, but for the scenario designed in the test, both accesses always occur independently of each other:
+Now the second test brings a different scenario where each cache access is looking for a different key. The question here was: will the second thread be blocked by the first one even if it's requesting a different key? The docs suggest that it may be possible, but for the scenario designed in this test, both accesses always occur independently of each other:
 
 ```
 22:27:51.059 [INFO] (Test worker) CaffeineTest: Starting...
@@ -40,7 +42,7 @@ Now the second test brings a different scenario where each cache access is looki
 22:27:52.063 [INFO] (Test worker) CaffeineTest: Done.
 ```
 
-Notice that both sense the miss at the same time, meaning the second one was not blocked by the first one. That doesn't prove it won't always block, however. Actually, the author mentions [here](https://github.com/ben-manes/caffeine/issues/192#issuecomment-337365618) how `ConcurrentHashMap` locks on the hash bin, and that lead me to believe Caffeine was being backed by such map. It becomes even more obvious when we read `ConcurrentHashMap`s `computeIfAbsent()` [documentation](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html#computeIfAbsent-K-java.util.function.Function-) and it says exactly the same as Caffeine's `get()` method. Putting a breakpoint on `get()` and navigating its guts proves this is true, as we eventually arrive at `computeIfAbsent()` as we go down the stack. 
+Notice that both sense the miss at the same time, meaning the second one was not blocked by the first one. That doesn't prove it won't always block, however. Actually, the author mentions [here](https://github.com/ben-manes/caffeine/issues/192#issuecomment-337365618) how `ConcurrentHashMap` locks on the hash bin, and that led me to believe Caffeine was being backed by such map. It becomes even more obvious when we read `ConcurrentHashMap`s `computeIfAbsent()` [documentation](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ConcurrentHashMap.html#computeIfAbsent-K-java.util.function.Function-) and it says exactly the same as Caffeine's `get()` method. Putting a breakpoint on `get()` and navigating its guts proves this is true, as we eventually arrive at `computeIfAbsent()` as we go down the stack. 
 
 ### Concurrency eventually leads to contention
 

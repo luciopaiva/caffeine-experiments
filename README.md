@@ -113,3 +113,15 @@ Internally, `get()` is delegating the task to an executor, so that's why it can 
 ```
 
 It now works as one would hope, with no contention whatsoever.
+
+### Is there a limit to the number of concurrent accesses?
+
+Yes. If I double the number of worker threads being used by the test (i.e., 8 -> 16), I can see that only 11 start the fetch right away; the other ones sit waiting. This is apparently being limited by the number of threads provided by the ForkJoinPool common pool that Caffeine uses internally. I confirmed that by passing a custom executor to the cache builder with 16 threads available and running the test again, when it will run everything with no contentions:
+
+```
+        ExecutorService auxExecutor = Executors.newFixedThreadPool(maximumConcurrentTasks);
+        // ...
+        Caffeine.newBuilder()
+            .executor(auxExecutor)
+            // ...
+```
